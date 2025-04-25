@@ -1,6 +1,8 @@
 # Azure API parameters
 $subscriptionKey = "YOUR_SUBSCRIPTION_KEY"  # <-- Replace with your actual subscription key
+$subscriptionKeyOpenAI = "" #openAI subscription key
 $endpoint = "https://api.cognitive.microsofttranslator.com/"
+$endpointOpenAI = "https://openaisii.openai.azure.com/"
 $location = "westeurope" # Specify the API region, for example, "westeurope"
 
 # Custom translator category
@@ -34,6 +36,87 @@ foreach ($unit in $translationUnits) {
     $sourceText = $unit.SelectSingleNode("x:source", $namespaceManager).'#text'
     $targetText = $unit.SelectSingleNode("x:target", $namespaceManager).'#text'
     $translationMap[$id] = [PSCustomObject]@{ English = $sourceText; Italian = $targetText }
+}
+
+‎XLF-AI-Translator.ps1
++66
+Original file line number	Diff line number	Diff line change
+@@ -36,6 +36,72 @@ foreach ($unit in $translationUnits) {
+    $translationMap[$id] = [PSCustomObject]@{ English = $sourceText; Italian = $targetText }
+}
+
+function Set-ToFullLanguageName {
+    param (
+        [string]$toLang
+    )
+    if ($toLang -eq 'pl') {
+        $toLang = 'polish'
+    }
+    if ($toLang -eq 'it') {
+        $toLang = 'italian'
+    }
+    if ($toLang -eq 'en') {
+        $toLang = 'english'
+    }
+    return $toLang
+}
+
+# Function to translate text using Azure OpenAI with ERP context
+# 1 - Create an Azure OpenAI resource, then
+# 2 - Click "Go to the Azure AI Foundry portal"
+# 3 - Deploy an Azure OpenAI model
+# 4 - Replace 
+function TranslateOpenAI-Text {
+    param (
+        [string]$text,
+        [string]$toLang,
+        [string]$subscriptionKey, #placeholder, replaced by $subscriptionKeyOpenAI
+        [string]$endpoint, #placeholder, replaced by $endpointOpenAI
+        [string]$location, #placeholder
+        [string]$categoryId #placeholder
+    )
+
+    $path = "openai/deployments/gpt-4o/chat/completions"
+    $params = "?api-version=2025-01-01-preview"
+    $uri = $endpointOpenAI + $path + $params
+    $toLangFull = Set-ToFullLanguageName -toLang $toLang
+
+    # Add ERP context to the text to be translated
+    $contextualText = $text
+
+    # HTTP request for translation
+    $messages = @(
+        @{
+            role = "system"
+            content = "You are a helpful assistant specialized in Microsoft Dynamics 365 Business Central. Translate the provided sentences into the $toLangFull language, preserving the Business Central context. After translation, verify if the result matches the level expected from a senior Business Central specialist. Output only the translated text, in the same format as the original, without any additional comments or explanations."
+        },
+        @{
+            role = "user"
+            content = $contextualText
+        }
+    )
+    
+    $jsonBody = @{
+        model = "gpt-4o"
+        temperature = 0.2
+        top_p = 1
+        messages = $messages
+    } | ConvertTo-Json -Depth 10
+    
+
+    $headers = @{
+        "Content-Type" = "application/json"
+        "api-key" = $subscriptionKeyOpenAI 
+    }
+
+    try {
+        $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $jsonBody
+        $translatedText = $response.choices[0].message.content
+        return $translatedText
+    } catch {
+        Write-Host "OpenAI Error during translation: $_"
+        return $null
+    }
 }
 
 # Function to translate text using Azure AI Translator with ERP context
@@ -104,7 +187,8 @@ foreach ($file in $otherFiles) {
                 $itText = $translationMap[$id].Italian
 
                 # Add ERP context to the translation request
-                $translatedText = Translate-Text -text $itText -toLang $toLang -subscriptionKey $subscriptionKey -endpoint $endpoint -location $location -categoryId $categoryId
+                #$translatedText = Translate-Text -text $itText -toLang $toLang -subscriptionKey $subscriptionKey -endpoint $endpoint -location $location -categoryId $categoryId
+                $translatedText = TranslateOpenAI-Text -text $itText -toLang $toLang -subscriptionKey $subscriptionKey -endpoint $endpoint -location $location -categoryId $categoryId
                 if ($translatedText) {
                     $unit.SelectSingleNode("x:target", $namespaceManager).'#text' = $translatedText
                     $fileTranslations++
